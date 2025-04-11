@@ -345,11 +345,14 @@ class TSPApp:
             return float('inf')
         return cost
 
-    def simulated_annealing(self, graph_data, use_cauchy, T0=1000, alpha=0.99, max_iterations=10000):
+    def simulated_annealing(self, graph_data, use_cauchy, T0=1000, alpha=0.999):
         """Решает TSP с использованием имитации отжига."""
         node_ids = [node["id"] for node in self.nodes]
-
-        max_attempts = len(node_ids)*200        
+        
+        n = len(node_ids)
+        max_attempts =  n * 100000 if n <= 20 else n * 20000
+        max_iterations = n * n * 10
+        
         used_tours = set()
         attempt = 0
         
