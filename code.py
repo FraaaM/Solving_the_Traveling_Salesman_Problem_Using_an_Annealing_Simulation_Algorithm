@@ -4,7 +4,6 @@ import math
 from tkinter.simpledialog import askinteger
 import time  
 import random
-import itertools
 
 class TSPApp:
     NODE_SIZE = 12
@@ -323,6 +322,41 @@ class TSPApp:
         self.output_area.create_line(begin_x, begin_y, finish_x, finish_y, 
                                      arrow=tk.LAST, fill="red", width=2, 
                                      arrowshape=(8, 8, 4))
+        
+    def has_hamiltonian_cycle(self, graph_data, nodes):
+            """Проверяет существование гамильтонова цикла и возвращает путь, если он есть."""
+            def backtrack(path, pos):
+                if pos == len(nodes):
+                    if path[0] in graph_data.get(path[-1], {}):
+                        return True
+                    return False
+                
+                current = path[-1]
+                for next_node in nodes:
+                    if next_node not in path and next_node in graph_data.get(current, {}):
+                        path.append(next_node)
+                        if backtrack(path, pos + 1):
+                            return True
+                        path.pop()
+                return False
+
+            # Проверяем наличие входящих и исходящих рёбер
+            in_degree = {node: 0 for node in nodes}
+            for node in nodes:
+                if node not in graph_data or not graph_data[node]:
+                    return None
+                for neighbor in graph_data[node]:
+                    in_degree[neighbor] = in_degree.get(neighbor, 0) + 1
+            for node in nodes:
+                if in_degree.get(node, 0) == 0:
+                    return None
+
+            # Пробуем построить цикл
+            for start_node in nodes:
+                path = [start_node]
+                if backtrack(path, 1):
+                    return path
+            return None
 
     def perturb_tour(self, tour):
         """Изменяет маршрут, меняя местами два случайных города."""
@@ -345,32 +379,19 @@ class TSPApp:
             return float('inf')
         return cost
 
-    def simulated_annealing(self, graph_data, use_cauchy, T0=1000, alpha=0.999):
+    def simulated_annealing(self, graph_data, use_cauchy, initial_tour, T0=1000, alpha=0.999):
         """Решает TSP с использованием имитации отжига."""
-        node_ids = [node["id"] for node in self.nodes]
-        
-        n = len(node_ids)
-        max_attempts =  n * 100000 if n <= 20 else n * 20000
-        max_iterations = n * n * 10
-        
-        used_tours = set()
-        attempt = 0
-        
         total_start_time = time.perf_counter()
+
+        # 2) Используем начальный маршрут из has_hamiltonian_cycle
+        if initial_tour is None:
+            execution_time = (time.perf_counter() - total_start_time) * 1000
+            return None, float('inf'), execution_time
         
-        # Поиск начального допустимого маршрута
-        while attempt < max_attempts:
-            current_tour = random.sample(node_ids, len(node_ids))
-            tour_tuple = tuple(current_tour)  
-            if tour_tuple not in used_tours:
-                used_tours.add(tour_tuple)
-                current_cost = self.calculate_tour_cost(current_tour, graph_data)
-                if current_cost != float('inf'): 
-                    break
-                attempt += 1
-        else:
-            total_end_time = time.perf_counter()
-            execution_time = (total_end_time - total_start_time) * 1000
+        current_tour = initial_tour.copy()
+        current_cost = self.calculate_tour_cost(current_tour, graph_data)
+        if current_cost == float('inf'):
+            execution_time = (time.perf_counter() - total_start_time) * 1000
             return None, float('inf'), execution_time
         
         # Основной процесс отжига
@@ -378,6 +399,9 @@ class TSPApp:
         best_tour = current_tour.copy()
         best_cost = current_cost
         T = T0
+        
+        n = len(initial_tour)
+        max_iterations = n * n * 10
         
         for k in range(1, max_iterations + 1):
             new_tour = self.perturb_tour(current_tour)
@@ -403,11 +427,12 @@ class TSPApp:
         execution_time = (end_time - start_time) * 1000
         
         return best_tour, best_cost, execution_time
-
+    
     def _solve_tsp(self):
         """Решает TSP с использованием имитации отжига и отображает результат."""
         for widget in self.result_container.winfo_children():
             widget.destroy()
+        
         if len(self.nodes) < 2:
             tk.Label(self.result_container, text="Слишком мало узлов для расчёта").pack(fill="both", expand=True)
             self.output_area.delete("all")
@@ -417,8 +442,16 @@ class TSPApp:
         for link in self.connections:
             graph_data[link[0]][link[1]] = link[2]
 
+        node_ids = [node["id"] for node in self.nodes]
+        initial_tour = self.has_hamiltonian_cycle(graph_data, node_ids)
+        if initial_tour is None:
+            self.result_text = "Гамильтонов цикл не существует. Решение невозможно."
+            tk.Label(self.result_container, text=self.result_text).pack(fill="both", expand=True)
+            self.output_area.delete("all")
+            return
+
         use_modification = self.use_modification_var.get()
-        self.optimal_route, min_total_cost, execution_time = self.simulated_annealing(graph_data, use_cauchy=use_modification)
+        self.optimal_route, min_total_cost, execution_time = self.simulated_annealing(graph_data, use_cauchy=use_modification, initial_tour=initial_tour)
         
         if self.optimal_route is not None and min_total_cost != float('inf'):
             route_str = [str(node) for node in self.optimal_route]
